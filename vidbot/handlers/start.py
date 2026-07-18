@@ -28,6 +28,16 @@ HELP = (
     "/id – show your Telegram id\n"
 )
 
+ADMIN_HELP = (
+    "\n**🛠 Admin panel**\n"
+    "/panel (or /admin) – open the inline admin panel\n"
+    "/stats – global stats + top users\n"
+    "/addadmin `<id>` – add an admin (or reply to a user)\n"
+    "/rmadmin `<id>` – remove an admin\n"
+    "/admins – list all admins\n"
+    "/setlimit `<n>` – change the daily download limit\n"
+)
+
 
 async def _notify_admins_new_user(client: TelegramClient, user) -> None:
     total = await db.total_user_count()
@@ -58,7 +68,10 @@ async def start_cmd(event) -> None:
 
 
 async def help_cmd(event) -> None:
-    await event.reply(HELP)
+    text = HELP
+    if await db.is_admin(event.sender_id):
+        text += ADMIN_HELP
+    await event.reply(text)
 
 
 async def id_cmd(event) -> None:

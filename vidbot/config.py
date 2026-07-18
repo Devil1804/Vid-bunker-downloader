@@ -56,6 +56,10 @@ class Config:
     MAX_CONCURRENT: int = _int("MAX_CONCURRENT", 4) or 4
     API_RETRIES: int = _int("API_RETRIES", 4) or 4
     DOWNLOAD_RETRIES: int = _int("DOWNLOAD_RETRIES", 3) or 3
+    # Parallel download connections (segmented download). 1 = sequential.
+    DOWNLOAD_CONNECTIONS: int = _int("DOWNLOAD_CONNECTIONS", 4) or 4
+    # Seconds to wait for the next chunk before treating the stream as stalled.
+    DOWNLOAD_READ_TIMEOUT: int = _int("DOWNLOAD_READ_TIMEOUT", 60) or 60
 
     # --- Paths ---
     DOWNLOAD_DIR: str = _str("DOWNLOAD_DIR", "venev")
