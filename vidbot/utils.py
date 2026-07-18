@@ -78,7 +78,7 @@ class ThrottledProgress:
         else:
             body = f"{humanbytes(current)} downloaded..."
         try:
-            await self.message.edit_text(f"{self.prefix}\n{body}")
+            await self.message.edit(f"{self.prefix}\n{body}")
         except Exception:
             # Ignore flood-wait / message-not-modified / edit races
             pass

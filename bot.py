@@ -1,4 +1,4 @@
-"""VidBunker downloader bot — entry point.
+"""VidBunker downloader bot — entry point (Telethon).
 
 Runs a bot client for all interaction, plus an optional user-account client
 used to upload files larger than 50MB (up to ~2GB) via a log channel.
@@ -10,7 +10,8 @@ import os
 import sys
 
 import httpx
-from pyrogram import Client, idle
+from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 from vidbot import database as db
 from vidbot.config import Config
@@ -22,6 +23,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+logging.getLogger("telethon").setLevel(logging.WARNING)
 log = logging.getLogger("vidbot")
 
 
@@ -39,28 +41,15 @@ async def main() -> None:
     await db.init_db()
     log.info("Database ready: %s", Config.DB_PATH)
 
-    bot = Client(
-        "vidbot",
-        api_id=Config.API_ID,
-        api_hash=Config.API_HASH,
-        bot_token=Config.BOT_TOKEN,
-        in_memory=True,
-    )
+    bot = TelegramClient(StringSession(), Config.API_ID, Config.API_HASH)
+    bot.parse_mode = "md"
 
     user = None
     if Config.has_userbot():
-        user = Client(
-            "vidbot_user",
-            api_id=Config.API_ID,
-            api_hash=Config.API_HASH,
-            session_string=Config.SESSION_STRING,
-            in_memory=True,
+        user = TelegramClient(
+            StringSession(Config.SESSION_STRING), Config.API_ID, Config.API_HASH
         )
-        log.info("Userbot enabled — large files (up to ~2GB) supported.")
-    else:
-        log.warning(
-            "No SESSION_STRING/LOG_CHANNEL set — uploads limited to 50MB (bot mode)."
-        )
+        user.parse_mode = "md"
 
     ctx.http = httpx.AsyncClient(
         headers={"User-Agent": "Mozilla/5.0 (VidBunkerBot)"},
@@ -71,21 +60,30 @@ async def main() -> None:
 
     register_all(bot)
 
-    await bot.start()
+    await bot.start(bot_token=Config.BOT_TOKEN)
+
     if user is not None:
-        await user.start()
+        await user.connect()
+        if not await user.is_user_authorized():
+            log.error("SESSION_STRING is invalid/expired. Regenerate with gen_session.py")
+            sys.exit(1)
+        log.info("Userbot enabled — large files (up to ~2GB) supported.")
+    else:
+        log.warning(
+            "No SESSION_STRING/LOG_CHANNEL set — large uploads unavailable (bot mode)."
+        )
 
     me = await bot.get_me()
     log.info("Bot started as @%s (concurrency=%d)", me.username, Config.MAX_CONCURRENT)
 
-    await idle()
-
-    log.info("Shutting down…")
-    if user is not None:
-        await user.stop()
-    await bot.stop()
-    await ctx.http.aclose()
-    await db.close_db()
+    try:
+        await bot.run_until_disconnected()
+    finally:
+        log.info("Shutting down…")
+        if user is not None:
+            await user.disconnect()
+        await ctx.http.aclose()
+        await db.close_db()
 
 
 if __name__ == "__main__":

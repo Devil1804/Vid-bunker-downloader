@@ -112,13 +112,16 @@ after they are delivered.
 
 ## How large-file delivery works
 
-Telegram bots can only *upload* files up to 50 MB. But a bot can *copy/forward*
-a message of any size that already exists on Telegram. So:
+Telegram bots can only *upload* files up to 50 MB. But a bot can re-send media
+of any size that already exists on Telegram. So (using Telethon):
 
 1. The **user account** (`SESSION_STRING`) uploads the downloaded file into the
    **log channel** — user accounts can upload up to ~2 GB.
-2. The **bot** then `copy_message`s that upload to the requesting user. No
-   re-upload happens, so the size limit doesn't apply.
+2. The **bot** then re-sends that media to the requesting user *by reference*
+   (`bot.send_file(user, message.media)`), with a forward fallback. No re-upload
+   happens, so the 50 MB limit doesn't apply.
+
+Built with [Telethon](https://docs.telethon.dev/).
 
 ## Project structure
 

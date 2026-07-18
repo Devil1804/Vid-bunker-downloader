@@ -1,12 +1,11 @@
-"""Handler registration."""
+"""Handler registration (Telethon)."""
 
-from pyrogram import Client
+from telethon import TelegramClient
 
 from . import admin, download, start
 
 
-def register_all(app: Client) -> None:
-    # Order matters: command handlers first, generic link handler last.
+def register_all(app: TelegramClient) -> None:
     start.register(app)
     admin.register(app)
     download.register(app)

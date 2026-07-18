@@ -1,27 +1,25 @@
-"""Deliver a downloaded file to a user.
+"""Deliver a downloaded file to a user (Telethon).
 
 Two modes:
   * Userbot mode (SESSION_STRING + LOG_CHANNEL set): the user account uploads
-    the file to the log channel (supports ~2GB), then the bot copies that
-    message to the target chat. This is how files larger than the 50MB bot
-    upload limit are delivered.
-  * Bot mode (no userbot configured): the bot uploads directly, limited to
-    ~50MB by Telegram.
+    the file to the log channel (supports ~2GB), then the bot re-sends that
+    media to the user by reference (no re-upload, so size is not capped at
+    50MB). Falls back to forwarding if a direct media re-send is rejected.
+  * Bot mode (no userbot configured): the bot uploads directly.
 """
 
 from typing import Awaitable, Callable, Optional
 
-from pyrogram import Client
+from telethon import TelegramClient
+from telethon.tl.types import DocumentAttributeFilename
 
 from .config import Config
 
 ProgressCB = Optional[Callable[[int, int], Awaitable[None]]]
 
-BOT_UPLOAD_LIMIT = 50 * 1024 * 1024
-
 
 class Uploader:
-    def __init__(self, bot: Client, user: Optional[Client]):
+    def __init__(self, bot: TelegramClient, user: Optional[TelegramClient]):
         self.bot = bot
         self.user = user
         self.log_channel = Config.LOG_CHANNEL
@@ -39,44 +37,30 @@ class Uploader:
         size: int,
         progress_cb: ProgressCB = None,
     ) -> None:
-        if self.large_file_ready:
-            await self._deliver_via_userbot(chat_id, file_path, filename, caption, progress_cb)
-        else:
-            if size > BOT_UPLOAD_LIMIT:
-                raise RuntimeError(
-                    "File is larger than 50MB but no userbot (SESSION_STRING + "
-                    "LOG_CHANNEL) is configured for large uploads."
-                )
-            await self.bot.send_video(
-                chat_id,
-                video=file_path,
-                caption=caption,
-                file_name=filename,
-                supports_streaming=True,
-                progress=progress_cb,
-            )
+        attrs = [DocumentAttributeFilename(filename)]
 
-    async def _deliver_via_userbot(
-        self,
-        chat_id: int,
-        file_path: str,
-        filename: str,
-        caption: str,
-        progress_cb: ProgressCB,
-    ) -> None:
-        # 1) user account uploads the big file into the log channel
-        sent = await self.user.send_video(
-            self.log_channel,
-            video=file_path,
-            caption=caption,
-            file_name=filename,
-            supports_streaming=True,
-            progress=progress_cb,
-        )
-        # 2) bot copies the message to the user (no re-upload; any size works)
-        await self.bot.copy_message(
-            chat_id=chat_id,
-            from_chat_id=self.log_channel,
-            message_id=sent.id,
-            caption=caption,
-        )
+        if self.large_file_ready:
+            # 1) user account uploads the big file into the log channel
+            sent = await self.user.send_file(
+                self.log_channel,
+                file_path,
+                caption=caption,
+                progress_callback=progress_cb,
+                supports_streaming=True,
+                attributes=attrs,
+            )
+            # 2) bot re-sends the same media by reference (any size, no re-upload)
+            try:
+                await self.bot.send_file(chat_id, sent.media, caption=caption)
+            except Exception:
+                # Fallback: forward from the log channel
+                await self.bot.forward_messages(chat_id, sent.id, self.log_channel)
+        else:
+            await self.bot.send_file(
+                chat_id,
+                file_path,
+                caption=caption,
+                progress_callback=progress_cb,
+                supports_streaming=True,
+                attributes=attrs,
+            )

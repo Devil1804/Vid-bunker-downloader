@@ -1,9 +1,8 @@
-"""/start and /help, plus new-user notifications to admins."""
+"""/start, /help, /quota, /id, plus new-user notifications to admins."""
 
 import asyncio
 
-from pyrogram import Client, filters
-from pyrogram.handlers import MessageHandler
+from telethon import TelegramClient, events
 
 from .. import database as db
 from ..config import Config
@@ -30,10 +29,10 @@ HELP = (
 )
 
 
-async def _notify_admins_new_user(client: Client, user) -> None:
+async def _notify_admins_new_user(client: TelegramClient, user) -> None:
     total = await db.total_user_count()
-    name = user.first_name or "Unknown"
-    uname = f"@{user.username}" if user.username else "—"
+    name = getattr(user, "first_name", None) or "Unknown"
+    uname = f"@{user.username}" if getattr(user, "username", None) else "—"
     text = (
         "🆕 **New user started the bot**\n\n"
         f"• Name: {name}\n"
@@ -48,38 +47,36 @@ async def _notify_admins_new_user(client: Client, user) -> None:
             pass
 
 
-async def start_cmd(client: Client, message) -> None:
-    user = message.from_user
+async def start_cmd(event) -> None:
+    user = await event.get_sender()
     if user is None:
         return
     is_new = await db.upsert_user(user)
-    await message.reply_text(WELCOME)
+    await event.reply(WELCOME)
     if is_new:
-        asyncio.create_task(_notify_admins_new_user(client, user))
+        asyncio.create_task(_notify_admins_new_user(event.client, user))
 
 
-async def help_cmd(client: Client, message) -> None:
-    await message.reply_text(HELP)
+async def help_cmd(event) -> None:
+    await event.reply(HELP)
 
 
-async def id_cmd(client: Client, message) -> None:
-    chat_id = message.chat.id
-    uid = message.from_user.id if message.from_user else "—"
-    await message.reply_text(f"👤 Your ID: `{uid}`\n💬 Chat ID: `{chat_id}`")
+async def id_cmd(event) -> None:
+    await event.reply(
+        f"👤 Your ID: `{event.sender_id}`\n💬 Chat ID: `{event.chat_id}`"
+    )
 
 
-async def quota_cmd(client: Client, message) -> None:
-    user = message.from_user
-    if user is None:
-        return
-    if await db.is_admin(user.id):
-        await message.reply_text("♾️ You are an admin — unlimited downloads.")
+async def quota_cmd(event) -> None:
+    uid = event.sender_id
+    if await db.is_admin(uid):
+        await event.reply("♾️ You are an admin — unlimited downloads.")
         return
     limit = await db.get_daily_limit()
-    used = await db.count_today(user.id)
+    used = await db.count_today(uid)
     remaining = max(0, limit - used)
-    stats = await db.user_stats(user.id)
-    await message.reply_text(
+    stats = await db.user_stats(uid)
+    await event.reply(
         f"📊 **Your quota today**\n\n"
         f"• Used: {used}/{limit}\n"
         f"• Remaining: **{remaining}**\n"
@@ -89,8 +86,8 @@ async def quota_cmd(client: Client, message) -> None:
     )
 
 
-def register(app: Client) -> None:
-    app.add_handler(MessageHandler(start_cmd, filters.command("start")))
-    app.add_handler(MessageHandler(help_cmd, filters.command("help")))
-    app.add_handler(MessageHandler(id_cmd, filters.command("id")))
-    app.add_handler(MessageHandler(quota_cmd, filters.command("quota")))
+def register(app: TelegramClient) -> None:
+    app.add_event_handler(start_cmd, events.NewMessage(pattern=r"^/start(?:@\w+)?(?:\s|$)"))
+    app.add_event_handler(help_cmd, events.NewMessage(pattern=r"^/help(?:@\w+)?(?:\s|$)"))
+    app.add_event_handler(id_cmd, events.NewMessage(pattern=r"^/id(?:@\w+)?(?:\s|$)"))
+    app.add_event_handler(quota_cmd, events.NewMessage(pattern=r"^/quota(?:@\w+)?(?:\s|$)"))
