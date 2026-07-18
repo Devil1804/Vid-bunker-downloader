@@ -48,18 +48,30 @@ cp .env.example .env      # then edit .env
 
 ### Enable large-file (up to ~2 GB) delivery
 
-1. Generate a user-account session string:
-   ```bash
-   python gen_session.py
-   ```
-   Log in with your phone number + code, then copy the printed string into
-   `SESSION_STRING` in `.env`.
-2. Create a **private channel** to use as an upload buffer. Add **both** your
+1. Create a **private channel** to use as an upload buffer. Add **both** your
    user account **and** the bot to it as members/admins.
-3. Put the channel's numeric id (looks like `-1001234567890`) into
+2. Put the channel's numeric id (looks like `-1001234567890`) into
    `LOG_CHANNEL` in `.env`.
+3. That's it. The **first time** you run `python bot.py`, it will ask for your
+   **phone number and the login code** Telegram sends you — once. It saves a
+   session file under `sessions/` and reuses it on every later run (no more
+   prompts). API_ID / API_HASH are read from `.env`, so you're not asked for
+   those.
 
-If you skip this, the bot still runs but can only send files up to 50 MB.
+If you skip `LOG_CHANNEL`, the bot still runs but can only send files up to 50 MB.
+
+> **Server / headless deploy?** If you can't log in interactively, run
+> `python gen_session.py` once on a machine where you can, then paste the
+> printed `SESSION_STRING` into `.env`.
+
+### Notes on Python version & network
+
+- Works on Python 3.9 – 3.14. (On 3.14, use `python bot.py`; the old
+  `telethon.sync` trick doesn't work there, which is why login is built into
+  `bot.py`.)
+- If startup hangs at "Connecting to Telegram…", your network may be
+  blocking/throttling Telegram. Set `PROXY` in `.env`, e.g.
+  `PROXY=socks5://127.0.0.1:9050`.
 
 ## Run
 

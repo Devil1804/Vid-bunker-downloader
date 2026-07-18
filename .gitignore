@@ -7,8 +7,14 @@ __pycache__/
 # Virtual environments
 .venv/
 .testenv/
+.test*/
 venv/
 env/
+
+# Telethon session files (contain account credentials — never commit)
+sessions/
+*.session
+*.session-journal
 
 # Environment / secrets
 .env

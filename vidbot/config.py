@@ -31,8 +31,17 @@ class Config:
     OWNER_ID: int = _int("OWNER_ID", 0) or 0
 
     # --- Large file delivery ---
+    # Optional: a saved user session string. If empty, a file session is used
+    # and you'll be asked for your phone number on the first run.
     SESSION_STRING: str = _str("SESSION_STRING")
     LOG_CHANNEL: int = _int("LOG_CHANNEL", 0) or 0
+
+    # Session file names (created automatically; reused on later runs).
+    BOT_SESSION: str = _str("BOT_SESSION", "sessions/bot")
+    USER_SESSION: str = _str("USER_SESSION", "sessions/user_account")
+
+    # Optional proxy, e.g. socks5://host:port or socks5://user:pass@host:port
+    PROXY: str = _str("PROXY")
 
     # --- Extraction API ---
     VIDBUNKER_API: str = _str(
@@ -67,5 +76,31 @@ class Config:
 
     @classmethod
     def has_userbot(cls) -> bool:
-        """True when large-file (>50MB) delivery is available."""
-        return bool(cls.SESSION_STRING and cls.LOG_CHANNEL)
+        """True when large-file (>50MB) delivery should be enabled.
+
+        Only LOG_CHANNEL is required now — the session comes from either
+        SESSION_STRING or an interactive file-session login on first run.
+        """
+        return bool(cls.LOG_CHANNEL)
+
+    @classmethod
+    def get_proxy(cls):
+        """Parse PROXY into a Telethon proxy dict, or None."""
+        if not cls.PROXY:
+            return None
+        from urllib.parse import urlparse
+
+        parsed = urlparse(cls.PROXY)
+        if not parsed.hostname or not parsed.port:
+            return None
+        proxy = {
+            "proxy_type": (parsed.scheme or "socks5").lower(),
+            "addr": parsed.hostname,
+            "port": parsed.port,
+            "rdns": True,
+        }
+        if parsed.username:
+            proxy["username"] = parsed.username
+        if parsed.password:
+            proxy["password"] = parsed.password
+        return proxy

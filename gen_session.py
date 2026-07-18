@@ -1,23 +1,31 @@
-"""Generate a Telethon user-account SESSION_STRING for large-file uploads.
+"""Optional: generate a Telethon user SESSION_STRING (for server deployments).
 
-Run:  python gen_session.py
-It will ask for your API_ID, API_HASH, phone number and login code, then
-print a session string. Paste it into .env as SESSION_STRING.
+You usually DON'T need this — just run `python bot.py` and it will ask for your
+phone number once and save a session file automatically.
 
-This logs in as YOUR user account. Keep the string secret — anyone with it
-can access your account.
+Use this only if you want a portable string (e.g. to deploy on a server where
+you can't log in interactively). It reads API_ID / API_HASH from your .env
+(falling back to a prompt), logs you in, and prints a SESSION_STRING to paste
+into .env.
+
+Works on Python 3.14 (uses the async API, not the broken telethon.sync bridge).
 """
 
-from telethon.sync import TelegramClient
+import asyncio
+
+from telethon import TelegramClient
 from telethon.sessions import StringSession
 
+from vidbot.config import Config
 
-def main() -> None:
-    api_id = int(input("API_ID: ").strip())
-    api_hash = input("API_HASH: ").strip()
 
-    with TelegramClient(StringSession(), api_id, api_hash) as client:
-        me = client.get_me()
+async def main() -> None:
+    api_id = Config.API_ID or int(input("API_ID: ").strip())
+    api_hash = Config.API_HASH or input("API_HASH: ").strip()
+
+    async with TelegramClient(StringSession(), api_id, api_hash,
+                              proxy=Config.get_proxy()) as client:
+        me = await client.get_me()
         session_string = client.session.save()
         uname = f"(@{me.username})" if me.username else ""
         print("\nLogged in as:", me.first_name, uname)
@@ -27,4 +35,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
