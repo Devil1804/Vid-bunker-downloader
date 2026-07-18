@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+.testenv/
+venv/
+env/
+
+# Environment / secrets
+.env
+*.session
+*.session-journal
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Downloads folder (auto-created at runtime)
+venev/
+
+# Logs
+*.log
