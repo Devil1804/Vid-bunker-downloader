@@ -133,7 +133,9 @@ async def main() -> None:
             await ctx.http.aclose()
             await db.close_db()
             sys.exit(1)
-        log.info("Userbot ready — large files up to ~2GB enabled.")
+        log.info("Userbot ready — linking the log channel…")
+        await ctx.uploader.prepare()
+        log.info("Large files up to ~2GB enabled.")
     else:
         log.warning(
             "LOG_CHANNEL not set — 2GB delivery is OFF (bot can still send up "
