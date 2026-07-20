@@ -4,11 +4,16 @@ Runs a bot client for all interaction, plus an optional user-account client
 used to upload files larger than 50MB (up to ~2GB) via a log channel.
 
 Session handling:
-  * The bot logs in from BOT_TOKEN (no prompt).
-  * The user account uses a saved session. If SESSION_STRING is set it is used
-    directly; otherwise a session FILE is used and, on the very first run, you
-    are asked for your phone number + login code once. After that the session
-    file is reused automatically — no prompt.
+  * The bot uses an IN-MEMORY session and logs in from BOT_TOKEN every start.
+    There is no bot .session file, so nothing to copy or corrupt between
+    machines.
+  * The user account uses SESSION_STRING if set (portable across machines —
+    recommended for a VPS). Otherwise it uses a local session FILE and, on the
+    first run, asks for your phone number + login code once.
+
+Note: Telethon .session FILES are NOT portable across Telethon versions or
+machines. For a VPS, generate a SESSION_STRING with `python gen_session.py`
+and put it in .env instead of copying a .session file.
 """
 
 import asyncio
@@ -40,23 +45,39 @@ def _ensure_session_dir(path: str) -> None:
         os.makedirs(parent, exist_ok=True)
 
 
+_SESSION_HELP = (
+    "This almost always means the session was created by a DIFFERENT Telethon "
+    "version — .session files are NOT portable across versions/machines.\n"
+    "Fix on this machine:\n"
+    "  1) pip install -r requirements.txt   (use the SAME telethon version)\n"
+    "  2) delete the copied session file(s) in the 'sessions/' folder\n"
+    "  3) set SESSION_STRING in .env (generate with `python gen_session.py`), "
+    "or just re-run to log in with your phone number."
+)
+
+
 def _build_user_client():
-    """Create the user-account client (file session or string session)."""
+    """Create the user-account client (string session preferred, else file)."""
     if not Config.has_userbot():
         return None
-    if Config.SESSION_STRING:
-        session = StringSession(Config.SESSION_STRING)
-    else:
-        _ensure_session_dir(Config.USER_SESSION)
-        session = Config.USER_SESSION  # Telethon treats a str as a file session
-    return TelegramClient(
-        session,
-        Config.API_ID,
-        Config.API_HASH,
-        proxy=Config.get_proxy(),
-        connection_retries=5,
-        retry_delay=2,
-    )
+    try:
+        if Config.SESSION_STRING:
+            session = StringSession(Config.SESSION_STRING)
+        else:
+            _ensure_session_dir(Config.USER_SESSION)
+            session = Config.USER_SESSION  # Telethon treats a str as a file session
+        return TelegramClient(
+            session,
+            Config.API_ID,
+            Config.API_HASH,
+            proxy=Config.get_proxy(),
+            connection_retries=5,
+            retry_delay=2,
+        )
+    except (ValueError, TypeError) as exc:
+        log.error("Could not load the user session: %s", exc)
+        log.error(_SESSION_HELP)
+        sys.exit(1)
 
 
 async def _start_user(user) -> bool:
@@ -88,7 +109,6 @@ async def main() -> None:
         sys.exit(1)
 
     os.makedirs(Config.DOWNLOAD_DIR, exist_ok=True)
-    _ensure_session_dir(Config.BOT_SESSION)
     log.info("Download folder ready: %s", os.path.abspath(Config.DOWNLOAD_DIR))
 
     await db.init_db()
@@ -104,8 +124,10 @@ async def main() -> None:
         if seeded:
             log.info("Seeded %d TeraBox API key(s) from env.", seeded)
 
+    # In-memory session: the bot re-authenticates from BOT_TOKEN each start, so
+    # there is no bot .session file to copy or corrupt across machines.
     bot = TelegramClient(
-        Config.BOT_SESSION,
+        StringSession(),
         Config.API_ID,
         Config.API_HASH,
         proxy=Config.get_proxy(),
