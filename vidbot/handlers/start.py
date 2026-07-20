@@ -9,18 +9,19 @@ from ..config import Config
 from ..utils import humanbytes
 
 WELCOME = (
-    "👋 **Welcome to the VidBunker Downloader bot!**\n\n"
-    "Send me one or more VidBunker links and I'll download the videos and send "
-    "them straight back to you here.\n\n"
-    "• You can paste multiple links in one message or forward messages — "
-    "I'll detect and process them all at once.\n"
+    "👋 **Welcome to the downloader bot!**\n\n"
+    "Send me one or more **VidBunker** or **TeraBox** links and I'll download the "
+    "videos and send them straight back to you here.\n\n"
+    "• Paste multiple links in one message or forward messages — I detect and "
+    "process them all at the same time.\n"
     "• Use /help to see what I can do."
 )
 
 HELP = (
     "**How to use**\n\n"
-    "1. Send or forward any `https://vidbunker.in/watch/...` link(s).\n"
-    "2. I resolve, download, and deliver each video.\n\n"
+    "1. Send or forward any **VidBunker** (`vidbunker.in/watch/...`) or "
+    "**TeraBox** (`terabox.com/s/...`, `1024terabox.com/s/...`, etc.) link(s).\n"
+    "2. I resolve, download, and deliver each file.\n\n"
     "**Commands**\n"
     "/start – restart the bot\n"
     "/help – this message\n"
@@ -36,6 +37,11 @@ ADMIN_HELP = (
     "/rmadmin `<id>` – remove an admin\n"
     "/admins – list all admins\n"
     "/setlimit `<n>` – change the daily download limit\n"
+    "/addkey `<key> [endpoint]` – add a TeraBox API key\n"
+    "/rmkey `<id|key>` – remove a TeraBox API key\n"
+    "/keys – list TeraBox API keys\n"
+    "/setdelete `<sec>` – video auto-delete time (0 = keep)\n"
+    "/setnotify `<sec>` – notification auto-delete time\n"
 )
 
 

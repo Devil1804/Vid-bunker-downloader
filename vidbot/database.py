@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS settings (
     value  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS api_keys (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    service   TEXT,
+    api_key   TEXT,
+    endpoint  TEXT,
+    added_by  INTEGER,
+    added_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(service, api_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_downloads_user ON downloads(user_id);
 CREATE INDEX IF NOT EXISTS idx_downloads_created ON downloads(created_at);
 """
@@ -209,12 +219,69 @@ async def set_setting(key: str, value: Any) -> None:
     await db.commit()
 
 
-async def get_daily_limit() -> int:
-    val = await get_setting("daily_limit", None)
+async def _get_int_setting(key: str, default: int) -> int:
+    val = await get_setting(key, None)
     try:
-        return int(val) if val is not None else Config.DEFAULT_DAILY_LIMIT
+        return int(val) if val is not None else default
     except (TypeError, ValueError):
-        return Config.DEFAULT_DAILY_LIMIT
+        return default
+
+
+async def get_daily_limit() -> int:
+    return await _get_int_setting("daily_limit", Config.DEFAULT_DAILY_LIMIT)
+
+
+async def get_auto_delete() -> int:
+    """Seconds after which delivered videos are deleted. 0 = keep."""
+    return await _get_int_setting("auto_delete_videos", Config.AUTO_DELETE_VIDEOS)
+
+
+async def get_notify_delete() -> int:
+    """Seconds after which status/notification/link messages are deleted."""
+    return await _get_int_setting("notify_delete", Config.NOTIFY_DELETE)
+
+
+# --------------------------- api keys -------------------------------------
+
+async def add_api_key(
+    service: str, api_key: str, endpoint: Optional[str], added_by: int
+) -> bool:
+    """Add an API key for a service. Returns True if newly added."""
+    db = _conn()
+    cur = await db.execute(
+        "INSERT OR IGNORE INTO api_keys (service, api_key, endpoint, added_by) "
+        "VALUES (?, ?, ?, ?)",
+        (service, api_key, endpoint, added_by),
+    )
+    await db.commit()
+    return cur.rowcount > 0
+
+
+async def remove_api_key(service: str, key_or_id: str) -> bool:
+    db = _conn()
+    if key_or_id.isdigit():
+        cur = await db.execute(
+            "DELETE FROM api_keys WHERE service=? AND id=?", (service, int(key_or_id))
+        )
+    else:
+        cur = await db.execute(
+            "DELETE FROM api_keys WHERE service=? AND api_key=?", (service, key_or_id)
+        )
+    await db.commit()
+    return cur.rowcount > 0
+
+
+async def list_api_keys(service: str) -> List[Dict[str, Any]]:
+    db = _conn()
+    async with db.execute(
+        "SELECT id, api_key, endpoint FROM api_keys WHERE service=? ORDER BY id",
+        (service,),
+    ) as cur:
+        rows = await cur.fetchall()
+    return [
+        {"id": r["id"], "api_key": r["api_key"], "endpoint": r["endpoint"]}
+        for r in rows
+    ]
 
 
 # ----------------------------- stats --------------------------------------

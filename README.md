@@ -1,40 +1,48 @@
-# VidBunker Downloader Bot
+# VidBunker + TeraBox Downloader Bot
 
-A Telegram bot that resolves VidBunker links, downloads the videos, and delivers
-them back in chat. It uses a **user account** to send files up to **~2 GB**
-(bypassing the 50 MB bot upload limit), processes **multiple links at once**,
-and ships with an **admin panel**, **per-user daily quotas**, and **stats**.
+A Telegram bot that resolves **VidBunker** and **TeraBox** links, downloads the
+files, and delivers them back in chat. Small files go straight through the bot;
+files over 50 MB are sent via a **user account** (up to ~2 GB) using a fast
+**parallel** upload. Ships with concurrent multi-link handling, an admin panel,
+per-user quotas, stats, rotatable TeraBox API keys, and auto-cleanup of chat.
 
 > ⚠️ You are responsible for ensuring you have the right to download and share
-> the content you process. Extraction relies on a third-party API that is
+> the content you process. Extraction relies on third-party APIs that are
 > outside this project's control and may rate-limit or change at any time.
 
 ## Features
 
-- **Up to ~2 GB delivery** via a user-account session + a log channel (bot copies
-  the uploaded message to the user, so file size is not capped at 50 MB).
-- **Concurrent multi-link handling** — paste or forward several links in one
-  message; they are detected, de-duplicated, and downloaded simultaneously
-  (concurrency is configurable; tuned low by default, raise it on big-RAM hosts).
-- **Multi-phase extraction fallback** — documented POST endpoint → direct GET
-  endpoint → retries with exponential backoff.
-- **Robust downloads** — streaming with retries, per-file size ceiling enforced
-  live (the source sends no `Content-Length`), automatic cleanup.
-- **Roles & quotas** — normal users get a configurable daily limit (default 10)
-  and a per-file cap (default 1 GB); admins are unlimited.
-- **Admin panel** — inline-keyboard panel plus commands to add/remove/list
-  admins, view global + per-user stats, and change the daily limit live.
-- **New-user notifications** — every admin is pinged with the new user's name
-  and ID, plus the running user count.
-- **SQLite persistence** — users, admins, downloads, and settings.
-- **Auto-created `venev/` download folder** (configurable, git-ignored).
+- **Two sources** — VidBunker (`vidbunker.in/watch/...`) and TeraBox
+  (`terabox.com`, `1024terabox.com`, and the many mirror domains).
+- **Smart delivery routing** — files **≤ 50 MB** are sent directly by the bot;
+  larger files (up to ~2 GB) are uploaded by the user account to a log channel
+  and re-sent to the user (no 50 MB cap).
+- **Ultra-fast uploads** — large-file uploads use a multi-connection parallel
+  transfer (FastTelethon), not a single slow stream.
+- **True parallel processing** — paste/forward many links; they're detected,
+  de-duplicated, and processed at the same time (bounded by `MAX_CONCURRENT`).
+- **Parallel resumable downloads** — segmented Range downloads with exact
+  size verification, so files are never truncated.
+- **Rotatable TeraBox API keys** — add several keys via the admin panel; they're
+  rotated automatically on rate-limit / credit / auth errors.
+- **Real error messages** — if extraction/download fails, the actual error
+  (e.g. the TeraBox API message) is shown to the user.
+- **Clean chat / auto-delete** — the user's link message and status
+  notifications are removed automatically; only the delivered videos remain.
+  Video auto-delete time is admin-configurable (0 = keep forever).
+- **Roles & quotas** — configurable daily limit + per-file cap for users;
+  admins are unlimited.
+- **Admin panel** — manage admins, TeraBox keys, limits, auto-delete; view
+  global + per-user stats; new-user notifications.
+- **SQLite persistence** and an auto-created `venev/` download folder.
 
 ## Requirements
 
-- Python 3.9+
-- A Telegram bot token (from [@BotFather](https://t.me/BotFather))
+- Python 3.9 – 3.14
+- Telegram bot token (from [@BotFather](https://t.me/BotFather))
 - `API_ID` / `API_HASH` from [my.telegram.org](https://my.telegram.org)
-- For files > 50 MB: a user-account **session string** and a **log channel**
+- For files > 50 MB: a log channel (+ a one-time phone login)
+- For TeraBox: an [xAPIverse](https://xapiverse.com) API key
 
 ## Setup
 
@@ -44,43 +52,36 @@ cd Vid-bunker-downloader
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env      # then edit .env
-```
-
-### Enable large-file (up to ~2 GB) delivery
-
-1. Create a **private channel** to use as an upload buffer. Add **both** your
-   user account **and** the bot to it as members/admins.
-2. Put the channel's numeric id (looks like `-1001234567890`) into
-   `LOG_CHANNEL` in `.env`.
-3. That's it. The **first time** you run `python bot.py`, it will ask for your
-   **phone number and the login code** Telegram sends you — once. It saves a
-   session file under `sessions/` and reuses it on every later run (no more
-   prompts). API_ID / API_HASH are read from `.env`, so you're not asked for
-   those.
-
-If you skip `LOG_CHANNEL`, the bot still runs but can only send files up to 50 MB.
-
-> **Server / headless deploy?** If you can't log in interactively, run
-> `python gen_session.py` once on a machine where you can, then paste the
-> printed `SESSION_STRING` into `.env`.
-
-### Notes on Python version & network
-
-- Works on Python 3.9 – 3.14. (On 3.14, use `python bot.py`; the old
-  `telethon.sync` trick doesn't work there, which is why login is built into
-  `bot.py`.)
-- If startup hangs at "Connecting to Telegram…", your network may be
-  blocking/throttling Telegram. Set `PROXY` in `.env`, e.g.
-  `PROXY=socks5://127.0.0.1:9050`.
-
-## Run
-
-```bash
 python bot.py
 ```
 
-The `venev/` folder is created automatically. Downloads are removed from disk
-after they are delivered.
+Fill in `API_ID`, `API_HASH`, `BOT_TOKEN`, `OWNER_ID` at minimum.
+
+### Enable large-file (up to ~2 GB) delivery
+
+1. Create a **private channel** as an upload buffer. Add **both** your user
+   account **and** the bot to it as admins.
+2. Set `LOG_CHANNEL` in `.env` to its `-100…` id.
+3. On the **first run**, `python bot.py` asks for your phone number + login code
+   once, saves a session file under `sessions/`, and reuses it afterward.
+
+If you skip `LOG_CHANNEL`, the bot still works but only for files ≤ 50 MB.
+
+### Enable TeraBox
+
+Get a key from xAPIverse (terabox-pro) and add it either way:
+
+- Seed it in `.env`: `TERABOX_API_KEYS=sk_xxx,sk_yyy` (comma-separated), or
+- Add it live as an admin: `/addkey sk_xxx`
+
+Add several keys to avoid rate limits — they rotate automatically.
+
+### Notes on Python 3.14 & network
+
+- On 3.14 use `python bot.py` (login is built in; the old `telethon.sync`
+  helper is broken on 3.14).
+- If it hangs at "Connecting to Telegram…", set a `PROXY` in `.env`, e.g.
+  `PROXY=socks5://127.0.0.1:9050`.
 
 ## Configuration (`.env`)
 
@@ -88,14 +89,19 @@ after they are delivered.
 |---|---|---|
 | `API_ID`, `API_HASH` | Telegram app credentials | — (required) |
 | `BOT_TOKEN` | Bot token from BotFather | — (required) |
-| `OWNER_ID` | Your user id; super-owner, cannot be removed | — (required) |
-| `SESSION_STRING` | User-account session for >50 MB uploads | — |
-| `LOG_CHANNEL` | Private channel id used as upload buffer | — |
-| `VIDBUNKER_API` | Extraction API endpoint | worker URL |
+| `OWNER_ID` | Super-owner user id (cannot be removed) | — (required) |
+| `LOG_CHANNEL` | Private channel id for >50 MB uploads | — |
+| `SESSION_STRING` | Optional saved user session (else file login) | — |
+| `VIDBUNKER_API` | VidBunker extraction endpoint | worker URL |
+| `TERABOX_API_URL` | TeraBox (xAPIverse) endpoint | xAPIverse URL |
+| `TERABOX_API_KEYS` | Comma-separated keys to seed on first run | — |
+| `FAST_UPLOAD_CONNECTIONS` | Parallel connections for big uploads | `8` |
+| `AUTO_DELETE_VIDEOS` | Seconds before videos are deleted (0 = keep) | `0` |
+| `NOTIFY_DELETE` | Seconds before notifications/links are deleted | `10` |
 | `DEFAULT_DAILY_LIMIT` | Daily downloads per normal user | `10` |
 | `USER_MAX_FILE_SIZE_MB` | Per-file cap for normal users (MB) | `1024` |
 | `MAX_CONCURRENT` | Simultaneous downloads across all users | `4` |
-| `API_RETRIES` / `DOWNLOAD_RETRIES` | Retry counts | `4` / `3` |
+| `DOWNLOAD_CONNECTIONS` | Parallel segments per download | `4` |
 | `DOWNLOAD_DIR` | Download folder | `venev` |
 | `DB_PATH` | SQLite database path | `vidbot.db` |
 
@@ -109,7 +115,7 @@ after they are delivered.
 | `/help` | Usage help |
 | `/quota` | Remaining downloads today + all-time stats |
 | `/id` | Show your user/chat id |
-| _(send/forward links)_ | Download one or many VidBunker links |
+| _(send/forward links)_ | Download VidBunker / TeraBox links |
 
 **Admins**
 
@@ -117,39 +123,43 @@ after they are delivered.
 |---|---|
 | `/panel` or `/admin` | Open the inline admin panel |
 | `/stats` | Global + top-user stats |
-| `/addadmin <id>` | Promote a user (or reply to their message) |
-| `/rmadmin <id>` | Remove an admin (owner can't be removed) |
-| `/admins` | List all admins |
-| `/setlimit <n>` | Change the daily limit for normal users |
+| `/addadmin <id>` / `/rmadmin <id>` / `/admins` | Manage admins |
+| `/setlimit <n>` | Daily download limit for users |
+| `/addkey <key> [endpoint]` | Add a TeraBox API key |
+| `/rmkey <id\|key>` / `/keys` | Remove / list TeraBox keys |
+| `/setdelete <sec>` | Video auto-delete time (0 = keep) |
+| `/setnotify <sec>` | Notification auto-delete time |
 
 ## How large-file delivery works
 
-Telegram bots can only *upload* files up to 50 MB. But a bot can re-send media
-of any size that already exists on Telegram. So (using Telethon):
+Telegram bots can only *upload* files up to 50 MB, but a bot can re-send media
+that already exists on Telegram. So for files over 50 MB:
 
-1. The **user account** (`SESSION_STRING`) uploads the downloaded file into the
-   **log channel** — user accounts can upload up to ~2 GB.
-2. The **bot** then re-sends that media to the requesting user *by reference*
-   (`bot.send_file(user, message.media)`), with a forward fallback. No re-upload
-   happens, so the 50 MB limit doesn't apply.
+1. The **user account** uploads the file to the **log channel** using a fast
+   parallel (multi-connection) transfer.
+2. The **bot** fetches that message and re-sends the media to the user (no
+   re-upload → the 50 MB cap doesn't apply), with a forward fallback.
+
+Files ≤ 50 MB skip all of that and are sent straight by the bot.
 
 Built with [Telethon](https://docs.telethon.dev/).
 
 ## Project structure
 
 ```
-bot.py                 # entry point: starts bot + userbot, registers handlers
-gen_session.py         # helper to generate a user session string
+bot.py                 # entry point: starts bot + userbot, seeds keys, registers handlers
+gen_session.py         # optional: generate a portable user SESSION_STRING (servers)
 vidbot/
   config.py            # env-based configuration
   context.py           # shared runtime objects
-  database.py          # aiosqlite: users, admins, downloads, settings
-  extractor.py         # multi-phase link resolution
-  downloader.py        # streaming download with retries + size cap
-  uploader.py          # userbot upload -> bot copy (2GB) / bot direct (50MB)
-  utils.py             # url extraction, formatting, throttled progress
+  database.py          # aiosqlite: users, admins, downloads, settings, api_keys
+  extractor.py         # multi-service dispatch (vidbunker + terabox, key rotation)
+  downloader.py        # parallel resumable Range download + size verification
+  fast_telethon.py     # multi-connection parallel upload
+  uploader.py          # size routing: bot direct (<=50MB) / userbot fast upload (>50MB)
+  utils.py             # url/formatting helpers, throttled progress, schedule_delete
   handlers/
     start.py           # /start, /help, /quota, /id, new-user notifications
-    download.py        # link intake, quota, concurrent processing
-    admin.py           # admin panel, admin management, stats, limits
+    download.py        # link intake, quota, parallel processing, auto-delete
+    admin.py           # admin panel, admins, keys, limits, auto-delete, stats
 ```

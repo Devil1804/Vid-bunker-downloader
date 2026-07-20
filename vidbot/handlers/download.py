@@ -1,4 +1,5 @@
-"""Core: detect links, enforce quota, download & deliver concurrently (Telethon)."""
+"""Core: detect links (vidbunker + terabox), enforce quota, download & deliver
+concurrently, auto-delete notifications, keep only videos, surface real errors."""
 
 import asyncio
 import os
@@ -10,120 +11,142 @@ from .. import database as db
 from ..config import Config
 from ..context import ctx
 from ..downloader import DownloadError, FileTooLarge, download
-from ..extractor import ExtractionError, resolve
-from ..utils import ThrottledProgress, extract_urls, humanbytes, safe_filename
+from ..extractor import ExtractionError, find_links, resolve
+from ..utils import ThrottledProgress, humanbytes, safe_filename, schedule_delete
+
+SERVICE_LABEL = {"vidbunker": "VidBunker", "terabox": "TeraBox"}
 
 
-async def _process_one(client: TelegramClient, user_id: int, url: str, is_admin: bool) -> bool:
-    """Handle a single link end-to-end. Returns True on success."""
+async def _process_link(
+    client: TelegramClient, user_id: int, url: str, service: str, is_admin: bool
+) -> bool:
+    """Resolve one link, download & deliver all its files. Returns True on success."""
     assert ctx.http is not None and ctx.uploader is not None and ctx.semaphore is not None
     async with ctx.semaphore:
+        notify_delete = await db.get_notify_delete()
+        auto_delete = await db.get_auto_delete()
+        label = SERVICE_LABEL.get(service, service)
         dl_id = await db.add_download(user_id, url, status="processing")
-        status = await client.send_message(user_id, f"🔎 Resolving…\n`{url}`")
+        status = await client.send_message(user_id, f"🔎 Resolving {label} link…")
         work_dir = os.path.join(Config.DOWNLOAD_DIR, str(dl_id))
+        success = False
         try:
-            info = await resolve(ctx.http, url)
-            filename = safe_filename(info["filename"])
-            os.makedirs(work_dir, exist_ok=True)
-            dest = os.path.join(work_dir, filename)
+            files = await resolve(ctx.http, url, service)
+            if not files:
+                raise ExtractionError("No downloadable files were found for this link.")
 
             max_size = (
                 Config.TELEGRAM_MAX_SIZE
                 if is_admin
                 else min(Config.USER_MAX_FILE_SIZE, Config.TELEGRAM_MAX_SIZE)
             )
+            os.makedirs(work_dir, exist_ok=True)
+            total = 0
+            multi = len(files) > 1
 
-            await status.edit(f"⬇️ Downloading **{filename}**…")
-            dl_progress = ThrottledProgress(status, f"⬇️ Downloading **{filename}**")
-            size = await download(ctx.http, info["link"], dest, max_size, dl_progress)
+            for idx, rf in enumerate(files, 1):
+                filename = safe_filename(rf.filename or f"file_{idx}")
+                dest = os.path.join(work_dir, f"{idx}_{filename}" if multi else filename)
 
-            if size > Config.TELEGRAM_MAX_SIZE:
-                raise FileTooLarge(Config.TELEGRAM_MAX_SIZE)
+                if rf.size and rf.size > max_size:
+                    raise FileTooLarge(max_size)
 
-            await status.edit(f"⬆️ Uploading **{filename}** ({humanbytes(size)})…")
-            up_progress = ThrottledProgress(status, f"⬆️ Uploading **{filename}**")
-            caption = f"🎬 **{filename}**\n📦 {humanbytes(size)}"
-            await ctx.uploader.deliver(
-                user_id, dest, filename, caption, size, up_progress
-            )
+                tag = f" ({idx}/{len(files)})" if multi else ""
+                dl_prefix = f"⬇️ Downloading **{filename}**{tag}"
+                await status.edit(dl_prefix + "…")
+                fsize = await download(
+                    ctx.http, rf.link, dest, max_size, ThrottledProgress(status, dl_prefix)
+                )
+                if fsize > Config.TELEGRAM_MAX_SIZE:
+                    raise FileTooLarge(Config.TELEGRAM_MAX_SIZE)
 
-            await db.update_download(dl_id, "completed", size, filename)
-            await status.edit(f"✅ Done: **{filename}** ({humanbytes(size)})")
-            return True
+                up_prefix = f"⬆️ Uploading **{filename}**{tag}"
+                await status.edit(f"{up_prefix} ({humanbytes(fsize)})…")
+                caption = f"🎬 **{filename}**\n📦 {humanbytes(fsize)}"
+                delivered = await ctx.uploader.deliver(
+                    user_id, dest, filename, caption, fsize,
+                    ThrottledProgress(status, up_prefix),
+                )
+                total += fsize
+
+                if auto_delete > 0 and delivered is not None:
+                    vid = delivered[0] if isinstance(delivered, list) else delivered
+                    if vid is not None:
+                        schedule_delete(client, user_id, [vid.id], auto_delete)
+
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+
+            await db.update_download(dl_id, "completed", total, files[0].filename)
+            success = True
 
         except FileTooLarge as exc:
             await db.update_download(dl_id, "failed")
             await status.edit(
-                f"❌ Skipped — file is larger than your limit "
-                f"({humanbytes(exc.limit)}).\n`{url}`"
+                f"❌ File is larger than your limit ({humanbytes(exc.limit)})."
             )
-        except ExtractionError:
+        except (ExtractionError, DownloadError) as exc:
             await db.update_download(dl_id, "failed")
-            await status.edit(
-                f"❌ Could not resolve this link. It may be invalid, removed, "
-                f"or the service is unavailable.\n`{url}`"
-            )
-        except DownloadError:
+            await status.edit(f"❌ {exc}")  # real error surfaced to the user
+        except Exception as exc:  # noqa: BLE001
             await db.update_download(dl_id, "failed")
-            await status.edit(f"❌ Download failed after retries.\n`{url}`")
-        except Exception as exc:  # noqa: BLE001 - surface anything unexpected
-            await db.update_download(dl_id, "failed")
-            await status.edit(f"❌ Unexpected error: `{exc}`\n`{url}`")
+            await status.edit(f"❌ Error: `{type(exc).__name__}: {exc}`")
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
-        return False
+
+        # On success remove the status message; on failure keep it so the user
+        # can read the real error.
+        if success:
+            schedule_delete(client, user_id, [status.id], notify_delete)
+        return success
 
 
 async def link_handler(event) -> None:
     text = event.raw_text or ""
     if text.startswith("/"):
-        return  # let command handlers deal with it
+        return
 
-    urls = extract_urls(text)
-    if not urls:
+    links = find_links(text)
+    if not links:
         return
 
     user = await event.get_sender()
     if user is None:
         return
     await db.upsert_user(user)
+
+    notify_delete = await db.get_notify_delete()
+    # The user's original (link) message is a "notification" -> auto-delete it.
+    schedule_delete(event.client, event.chat_id, [event.id], notify_delete)
+
     if await db.is_banned(user.id):
-        await event.reply("🚫 You are banned from using this bot.")
+        warn = await event.reply("🚫 You are banned from using this bot.")
+        schedule_delete(event.client, event.chat_id, [warn.id], notify_delete)
         return
 
     is_admin = await db.is_admin(user.id)
 
-    note = ""
     if not is_admin:
         limit = await db.get_daily_limit()
         used = await db.count_today(user.id)
         remaining = max(0, limit - used)
         if remaining <= 0:
-            await event.reply(
+            warn = await event.reply(
                 f"🚦 Daily limit reached ({used}/{limit}). Try again tomorrow."
             )
+            schedule_delete(event.client, event.chat_id, [warn.id], notify_delete)
             return
-        if len(urls) > remaining:
-            note = (
-                f"\n⚠️ You have {remaining} download(s) left today — "
-                f"processing the first {remaining} of {len(urls)} links."
-            )
-            urls = urls[:remaining]
+        if len(links) > remaining:
+            links = links[:remaining]
 
-    await event.reply(
-        f"📥 Queued **{len(urls)}** link(s). Processing simultaneously…{note}"
-    )
-
+    # True parallel: fire all links at once (bounded by the global semaphore).
     tasks = [
-        asyncio.create_task(_process_one(event.client, user.id, url, is_admin))
-        for url in urls
+        asyncio.create_task(_process_link(event.client, user.id, url, svc, is_admin))
+        for url, svc in links
     ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    ok = sum(1 for r in results if r is True)
-    await event.client.send_message(
-        user.id, f"🏁 Finished: **{ok}/{len(urls)}** delivered successfully."
-    )
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def register(app: TelegramClient) -> None:

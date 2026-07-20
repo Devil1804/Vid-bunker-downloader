@@ -1,5 +1,6 @@
 """Small helpers: URL extraction, formatting, throttled progress."""
 
+import asyncio
 import re
 import time
 from typing import List, Optional
@@ -52,6 +53,23 @@ def safe_filename(name: Optional[str], fallback: str = "video.mp4") -> str:
     name = re.sub(r'[<>:"|?*\x00-\x1f]', "", name)
     name = name.strip(". ")
     return name or fallback
+
+
+def schedule_delete(client, chat_id: int, message_ids, delay: float) -> None:
+    """Delete messages after `delay` seconds (fire-and-forget). delay<=0 = now."""
+    ids = [m for m in (message_ids or []) if m]
+    if not ids:
+        return
+
+    async def _task():
+        if delay > 0:
+            await asyncio.sleep(delay)
+        try:
+            await client.delete_messages(chat_id, ids)
+        except Exception:
+            pass
+
+    asyncio.create_task(_task())
 
 
 class ThrottledProgress:

@@ -94,6 +94,16 @@ async def main() -> None:
     await db.init_db()
     log.info("Database ready: %s", Config.DB_PATH)
 
+    # Seed TeraBox API keys from env (idempotent; admins can also add via /addkey).
+    if Config.TERABOX_API_KEYS:
+        seeded = 0
+        for raw_key in Config.TERABOX_API_KEYS.split(","):
+            key = raw_key.strip()
+            if key and await db.add_api_key("terabox", key, Config.TERABOX_API_URL, Config.OWNER_ID):
+                seeded += 1
+        if seeded:
+            log.info("Seeded %d TeraBox API key(s) from env.", seeded)
+
     bot = TelegramClient(
         Config.BOT_SESSION,
         Config.API_ID,

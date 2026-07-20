@@ -1,32 +1,32 @@
 """Deliver a downloaded file to a user (Telethon).
 
-Two modes:
-  * Userbot mode (LOG_CHANNEL set + a user session): the user account uploads
-    the file to the log channel (supports ~2GB), then the BOT re-sends that
-    media to the user. Because the bot doesn't re-upload, size isn't capped at
-    50MB.
-  * Bot mode (no userbot): the bot uploads directly.
+Routing by size:
+  * <= 50MB  -> the BOT uploads directly (fastest, no channel needed).
+  * >  50MB  -> the userbot uploads to the log channel using a fast parallel
+                (multi-connection) upload, then the BOT re-sends that media to
+                the user (no re-upload, so the 50MB bot cap doesn't apply).
 
-Entity resolution note:
-    A bot cannot resolve a private channel by id unless it has the channel's
-    access_hash cached. We seed that cache at startup (`prepare()`): the userbot
-    posts a tiny message to the log channel, the bot receives that update and
-    Telethon caches the channel, after which the bot can fetch/forward from it.
-    This is what fixes "Could not find the input entity for PeerChannel(...)".
+Returns the delivered Message so callers can schedule auto-deletion.
 """
 
 import asyncio
 import logging
+import mimetypes
 from typing import Awaitable, Callable, Optional
 
 from telethon import TelegramClient
 from telethon.tl.types import DocumentAttributeFilename
 
 from .config import Config
+from .fast_telethon import fast_upload
 
 log = logging.getLogger("vidbot.uploader")
 
 ProgressCB = Optional[Callable[[int, int], Awaitable[None]]]
+
+
+def _mime_for(filename: str) -> str:
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
 class Uploader:
@@ -34,8 +34,8 @@ class Uploader:
         self.bot = bot
         self.user = user
         self.log_channel = Config.LOG_CHANNEL
-        self.user_log_entity = None  # resolved by the userbot
-        self.bot_log_entity = None   # resolved by the bot (needs seeding)
+        self.user_log_entity = None
+        self.bot_log_entity = None
 
     @property
     def large_file_ready(self) -> bool:
@@ -45,16 +45,12 @@ class Uploader:
         """Make sure both clients can address the log channel."""
         if not self.large_file_ready:
             return
-
-        # The userbot can resolve the channel directly (it's in its dialogs).
         try:
             self.user_log_entity = await self.user.get_entity(self.log_channel)
         except Exception as exc:  # noqa: BLE001
             log.warning("Userbot could not resolve LOG_CHANNEL %s: %s", self.log_channel, exc)
             self.user_log_entity = self.log_channel
 
-        # Seed the BOT's entity cache: post from the userbot so the bot receives
-        # an update carrying the channel's access_hash, then resolve it.
         init_msg = None
         try:
             init_msg = await self.user.send_message(
@@ -79,25 +75,20 @@ class Uploader:
         if self.bot_log_entity is None:
             log.warning(
                 "Bot still can't resolve LOG_CHANNEL. Make sure the BOT is an "
-                "admin/member of the channel, and that LOG_CHANNEL uses the "
-                "-100xxxxxxxxxx form. Will retry lazily on first delivery."
+                "admin/member of the channel and LOG_CHANNEL uses the -100 form."
             )
         else:
             log.info("Log channel linked for both bot and userbot.")
 
     async def _bot_channel(self):
-        """Return a bot-resolvable channel entity, seeding lazily if needed."""
         if self.bot_log_entity is not None:
             return self.bot_log_entity
         try:
             self.bot_log_entity = await self.bot.get_entity(self.log_channel)
             return self.bot_log_entity
         except Exception:  # noqa: BLE001
-            # Re-seed once via the userbot, then retry.
             try:
-                await self.user.send_message(
-                    self.user_log_entity or self.log_channel, "🔧 relink"
-                )
+                await self.user.send_message(self.user_log_entity or self.log_channel, "🔧 relink")
             except Exception:  # noqa: BLE001
                 pass
             for _ in range(10):
@@ -106,7 +97,7 @@ class Uploader:
                     return self.bot_log_entity
                 except Exception:  # noqa: BLE001
                     await asyncio.sleep(1)
-        return self.log_channel  # last resort; may still raise upstream
+        return self.log_channel
 
     async def deliver(
         self,
@@ -116,41 +107,61 @@ class Uploader:
         caption: str,
         size: int,
         progress_cb: ProgressCB = None,
-    ) -> None:
+    ):
         attrs = [DocumentAttributeFilename(filename)]
+        mime = _mime_for(filename)
+        streamable = mime.startswith("video")
 
-        if not self.large_file_ready:
-            await self.bot.send_file(
+        # Small files (or no userbot): the bot sends directly.
+        if size <= Config.BOT_UPLOAD_LIMIT or not self.large_file_ready:
+            return await self.bot.send_file(
                 chat_id,
                 file_path,
                 caption=caption,
-                progress_callback=progress_cb,
-                supports_streaming=True,
                 attributes=attrs,
+                mime_type=mime,
+                supports_streaming=streamable,
+                progress_callback=progress_cb,
             )
-            return
 
-        # 1) userbot uploads the big file into the log channel
-        sent = await self.user.send_file(
-            self.user_log_entity or self.log_channel,
-            file_path,
-            caption=caption,
-            progress_callback=progress_cb,
-            supports_streaming=True,
-            attributes=attrs,
-        )
-
+        # Large files: userbot uploads (fast) -> bot re-sends.
+        sent = await self._userbot_upload(file_path, filename, caption, mime, attrs, progress_cb)
         entity = await self._bot_channel()
-
-        # 2) preferred: bot fetches the message from the channel (getting its own
-        #    valid file_reference) and re-sends it cleanly (no "forwarded" header).
         try:
             src = await self.bot.get_messages(entity, ids=sent.id)
             if src is not None and src.media is not None:
-                await self.bot.send_file(chat_id, src.media, caption=caption)
-                return
+                return await self.bot.send_file(chat_id, src.media, caption=caption)
         except Exception as exc:  # noqa: BLE001
-            log.warning("Clean re-send failed (%s); falling back to forward.", exc)
+            log.warning("Clean re-send failed (%s); forwarding instead.", exc)
+        return await self.bot.forward_messages(chat_id, sent.id, entity)
 
-        # 3) fallback: forward from the log channel
-        await self.bot.forward_messages(chat_id, sent.id, entity)
+    async def _userbot_upload(self, file_path, filename, caption, mime, attrs, progress_cb):
+        channel = self.user_log_entity or self.log_channel
+        streamable = mime.startswith("video")
+        conns = Config.FAST_UPLOAD_CONNECTIONS
+
+        if conns and conns > 1:
+            try:
+                input_file = await fast_upload(
+                    self.user, file_path, filename, conns, progress_cb
+                )
+                return await self.user.send_file(
+                    channel,
+                    file=input_file,
+                    caption=caption,
+                    attributes=attrs,
+                    mime_type=mime,
+                    supports_streaming=streamable,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Fast parallel upload failed (%s); using standard upload.", exc)
+
+        return await self.user.send_file(
+            channel,
+            file_path,
+            caption=caption,
+            attributes=attrs,
+            mime_type=mime,
+            supports_streaming=streamable,
+            progress_callback=progress_cb,
+        )
