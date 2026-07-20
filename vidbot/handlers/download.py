@@ -49,7 +49,7 @@ async def _process_link(
                 dest = os.path.join(work_dir, f"{idx}_{filename}" if multi else filename)
 
                 if rf.size and rf.size > max_size:
-                    raise FileTooLarge(max_size)
+                    raise FileTooLarge(max_size, rf.size)
 
                 tag = f" ({idx}/{len(files)})" if multi else ""
                 dl_prefix = f"⬇️ Downloading **{filename}**{tag}"
@@ -84,9 +84,20 @@ async def _process_link(
 
         except FileTooLarge as exc:
             await db.update_download(dl_id, "failed")
-            await status.edit(
-                f"❌ File is larger than your limit ({humanbytes(exc.limit)})."
-            )
+            actual = getattr(exc, "actual", 0)
+            size_part = f" ({humanbytes(actual)})" if actual else ""
+            if exc.limit >= Config.TELEGRAM_MAX_SIZE:
+                await status.edit(
+                    f"❌ This file{size_part} is over Telegram's "
+                    f"{humanbytes(Config.TELEGRAM_MAX_SIZE)} upload limit. "
+                    "A Telegram **Premium** account is needed for files up to 4GB "
+                    "(then set `TELEGRAM_MAX_SIZE_MB=4096`)."
+                )
+            else:
+                await status.edit(
+                    f"❌ This file{size_part} is over your per-file limit "
+                    f"({humanbytes(exc.limit)}). Ask an admin to raise it."
+                )
         except (ExtractionError, DownloadError) as exc:
             await db.update_download(dl_id, "failed")
             await status.edit(f"❌ {exc}")  # real error surfaced to the user

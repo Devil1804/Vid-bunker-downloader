@@ -31,9 +31,10 @@ class DownloadError(Exception):
 
 
 class FileTooLarge(DownloadError):
-    def __init__(self, limit: int):
+    def __init__(self, limit: int, actual: int = 0):
         self.limit = limit
-        super().__init__(f"File exceeds the size limit of {limit} bytes")
+        self.actual = actual
+        super().__init__(f"File ({actual} bytes) exceeds the size limit of {limit} bytes")
 
 
 class _RangeUnsupported(Exception):
@@ -99,7 +100,7 @@ async def download(
     total, accepts_ranges = await _probe(client, link)
 
     if total and total > max_size:
-        raise FileTooLarge(max_size)
+        raise FileTooLarge(max_size, total)
 
     if total and accepts_ranges:
         conns = Config.DOWNLOAD_CONNECTIONS

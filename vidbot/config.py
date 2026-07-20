@@ -67,7 +67,9 @@ class Config:
     # --- Limits ---
     DEFAULT_DAILY_LIMIT: int = _int("DEFAULT_DAILY_LIMIT", 10) or 10
     USER_MAX_FILE_SIZE: int = (_int("USER_MAX_FILE_SIZE_MB", 1024) or 1024) * 1024 * 1024
-    TELEGRAM_MAX_SIZE: int = 2 * 1024 * 1024 * 1024  # ~2GB hard cap for a normal account
+    # Telegram upload cap: ~2GB for a normal account, ~4GB with Premium.
+    # Set TELEGRAM_MAX_SIZE_MB=4096 only if the user account has Premium.
+    TELEGRAM_MAX_SIZE: int = (_int("TELEGRAM_MAX_SIZE_MB", 2048) or 2048) * 1024 * 1024
     MAX_CONCURRENT: int = _int("MAX_CONCURRENT", 4) or 4
     API_RETRIES: int = _int("API_RETRIES", 4) or 4
     DOWNLOAD_RETRIES: int = _int("DOWNLOAD_RETRIES", 3) or 3
