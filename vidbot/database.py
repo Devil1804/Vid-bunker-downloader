@@ -241,6 +241,13 @@ async def get_notify_delete() -> int:
     return await _get_int_setting("notify_delete", Config.NOTIFY_DELETE)
 
 
+async def get_delivery_mode() -> str:
+    """Delivery mode: auto | link | telegram."""
+    val = await get_setting("delivery_mode", None)
+    mode = (val or Config.DELIVERY_MODE or "auto").lower()
+    return mode if mode in ("auto", "link", "telegram") else "auto"
+
+
 # --------------------------- api keys -------------------------------------
 
 async def add_api_key(

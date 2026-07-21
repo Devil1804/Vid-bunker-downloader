@@ -21,7 +21,9 @@ HELP = (
     "**How to use**\n\n"
     "1. Send or forward any **VidBunker** (`vidbunker.in/watch/...`) or "
     "**TeraBox** (`terabox.com/s/...`, `1024terabox.com/s/...`, etc.) link(s).\n"
-    "2. I resolve, download, and deliver each file.\n\n"
+    "2. Small files come straight into Telegram; large files are delivered as a "
+    "fast **direct download link** (mid-size lets you choose). You can **cancel** "
+    "any download/upload with the button on the status message.\n\n"
     "**Commands**\n"
     "/start – restart the bot\n"
     "/help – this message\n"
@@ -42,6 +44,7 @@ ADMIN_HELP = (
     "/keys – list TeraBox API keys\n"
     "/setdelete `<sec>` – video auto-delete time (0 = keep)\n"
     "/setnotify `<sec>` – notification auto-delete time\n"
+    "/setmode `auto|link|telegram` – how files are delivered\n"
 )
 
 

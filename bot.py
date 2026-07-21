@@ -144,7 +144,8 @@ async def main() -> None:
         headers={"User-Agent": "Mozilla/5.0 (VidBunkerBot)"},
         follow_redirects=True,
     )
-    ctx.semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT)
+    ctx.link_semaphore = asyncio.Semaphore(Config.MAX_LINK_CONCURRENT)
+    ctx.dl_semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT)
     ctx.uploader = Uploader(bot, user)
 
     register_all(bot)

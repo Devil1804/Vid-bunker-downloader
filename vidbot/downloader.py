@@ -89,6 +89,15 @@ async def _probe(client: httpx.AsyncClient, link: str) -> Tuple[int, bool]:
     return total, accepts
 
 
+async def get_total_size(client: httpx.AsyncClient, link: str) -> int:
+    """Best-effort total size in bytes (0 if unknown). Used to route delivery."""
+    try:
+        total, _ = await _probe(client, link)
+        return total
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 async def download(
     client: httpx.AsyncClient,
     link: str,

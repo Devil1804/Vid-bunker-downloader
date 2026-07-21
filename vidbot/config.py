@@ -23,6 +23,13 @@ def _str(name: str, default: str = "") -> str:
     return raw.strip() if raw and raw.strip() else default
 
 
+def _bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on", "y")
+
+
 class Config:
     # --- Telegram core ---
     API_ID: Optional[int] = _int("API_ID")
@@ -57,6 +64,19 @@ class Config:
     BOT_UPLOAD_LIMIT: int = 50 * 1024 * 1024  # files at/under this go via the bot directly
     # Parallel connections for the fast userbot upload (0/1 disables fast upload).
     FAST_UPLOAD_CONNECTIONS: int = _int("FAST_UPLOAD_CONNECTIONS", 8) or 8
+
+    # Default delivery mode (admin-editable via /setmode): auto | link | telegram
+    #   auto     -> small files to Telegram, big files as direct link (ask for mid-size)
+    #   link     -> always send a direct download link (no upload)
+    #   telegram -> always upload to Telegram (falls back to link when > TG limit)
+    DELIVERY_MODE: str = _str("DELIVERY_MODE", "auto").lower()
+
+    # --- URL shortener (best effort; falls back to the raw link) ---
+    ENABLE_SHORTENER: bool = _bool("ENABLE_SHORTENER", True)
+    SHORTENER_SERVICE: str = _str("SHORTENER_SERVICE", "tinyurl").lower()  # tinyurl | isgd
+
+    # Concurrency for the lightweight resolve/link path (near-instant work).
+    MAX_LINK_CONCURRENT: int = _int("MAX_LINK_CONCURRENT", 1000) or 1000
 
     # --- Auto-delete (admin-editable at runtime; these are just defaults) ---
     # Seconds after which delivered videos are removed. 0 = keep videos forever.

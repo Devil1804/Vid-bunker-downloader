@@ -17,8 +17,16 @@ per-user quotas, stats, rotatable TeraBox API keys, and auto-cleanup of chat.
 - **Smart delivery routing** — files **≤ 50 MB** are sent directly by the bot;
   larger files (up to ~2 GB) are uploaded by the user account to a log channel
   and re-sent to the user (no 50 MB cap).
+- **Delivery modes** (`/setmode`, default `auto`): `auto` sends small files into
+  Telegram and big files as an instant **direct download link** (mid-size lets
+  the user choose); `link` always sends a link; `telegram` always uploads.
+  Files over the Telegram limit always fall back to a link.
+- **Direct links** are shortened (best effort) and sent as a one-tap Download
+  button — the user downloads from the CDN at full speed (great with IDM/1DM).
+- **Cancel button** on every in-progress download/upload.
 - **Ultra-fast uploads** — large-file uploads use a multi-connection parallel
-  transfer (FastTelethon), not a single slow stream.
+  transfer (FastTelethon), not a single slow stream. Resolve/link work runs at
+  very high concurrency (`MAX_LINK_CONCURRENT`, default 1000).
 - **True parallel processing** — paste/forward many links; they're detected,
   de-duplicated, and processed at the same time (bounded by `MAX_CONCURRENT`).
 - **Parallel resumable downloads** — segmented Range downloads with exact
@@ -129,6 +137,7 @@ Add several keys to avoid rate limits — they rotate automatically.
 | `/rmkey <id\|key>` / `/keys` | Remove / list TeraBox keys |
 | `/setdelete <sec>` | Video auto-delete time (0 = keep) |
 | `/setnotify <sec>` | Notification auto-delete time |
+| `/setmode <auto\|link\|telegram>` | How files are delivered |
 
 ## How large-file delivery works
 

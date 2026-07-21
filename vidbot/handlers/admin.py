@@ -109,8 +109,10 @@ async def _settings_text() -> str:
     auto = await db.get_auto_delete()
     notify = await db.get_notify_delete()
     auto_txt = "off (videos kept)" if auto == 0 else f"{auto}s"
+    mode = await db.get_delivery_mode()
     return (
         "⚙️ **Settings**\n\n"
+        f"• Delivery mode: **{mode}** — `/setmode auto|link|telegram`\n"
         f"• Daily limit (users): **{limit}** — `/setlimit <n>`\n"
         f"• Video auto-delete: **{auto_txt}** — `/setdelete <sec>` (0 = keep)\n"
         f"• Notification auto-delete: **{notify}s** — `/setnotify <sec>`\n"
@@ -256,6 +258,25 @@ async def setnotify_cmd(event) -> None:
     await event.reply(f"✅ Notifications will auto-delete after **{secs}s**.")
 
 
+async def setmode_cmd(event) -> None:
+    if not await _is_admin_event(event):
+        return
+    parts = (event.raw_text or "").split()
+    if len(parts) < 2 or parts[1].lower() not in ("auto", "link", "telegram"):
+        cur = await db.get_delivery_mode()
+        await event.reply(
+            f"Delivery mode is **{cur}**.\n"
+            "Usage: `/setmode auto|link|telegram`\n"
+            "• auto — small→Telegram, big→direct link (asks for mid-size)\n"
+            "• link — always a direct download link\n"
+            "• telegram — always upload to Telegram (link if too big)"
+        )
+        return
+    mode = parts[1].lower()
+    await db.set_setting("delivery_mode", mode)
+    await event.reply(f"✅ Delivery mode set to **{mode}**.")
+
+
 # ---------------------------- callbacks -----------------------------------
 
 async def panel_cb(event) -> None:
@@ -292,4 +313,5 @@ def register(app: TelegramClient) -> None:
     app.add_event_handler(keys_cmd, events.NewMessage(pattern=r"^/keys(?:@\w+)?(?:\s|$)"))
     app.add_event_handler(setdelete_cmd, events.NewMessage(pattern=r"^/setdelete(?:@\w+)?(?:\s|$)"))
     app.add_event_handler(setnotify_cmd, events.NewMessage(pattern=r"^/setnotify(?:@\w+)?(?:\s|$)"))
+    app.add_event_handler(setmode_cmd, events.NewMessage(pattern=r"^/setmode(?:@\w+)?(?:\s|$)"))
     app.add_event_handler(panel_cb, events.CallbackQuery(pattern=b"panel:"))

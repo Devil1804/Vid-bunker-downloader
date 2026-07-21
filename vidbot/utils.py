@@ -75,10 +75,11 @@ def schedule_delete(client, chat_id: int, message_ids, delay: float) -> None:
 class ThrottledProgress:
     """Edits a Telegram message with a progress bar, at most every `interval` sec."""
 
-    def __init__(self, message, prefix: str, interval: float = 5.0):
+    def __init__(self, message, prefix: str, interval: float = 5.0, buttons=None):
         self.message = message
         self.prefix = prefix
         self.interval = interval
+        self.buttons = buttons
         self._last = 0.0
 
     async def __call__(self, current: int, total: int) -> None:
@@ -94,9 +95,9 @@ class ThrottledProgress:
                 f"{humanbytes(current)} / {humanbytes(total)}"
             )
         else:
-            body = f"{humanbytes(current)} downloaded..."
+            body = f"{humanbytes(current)} transferred..."
         try:
-            await self.message.edit(f"{self.prefix}\n{body}")
+            await self.message.edit(f"{self.prefix}\n{body}", buttons=self.buttons)
         except Exception:
             # Ignore flood-wait / message-not-modified / edit races
             pass
